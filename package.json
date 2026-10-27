@@ -1,0 +1,8 @@
+{
+  "name": "doday6-help",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest"
+  }
+}
