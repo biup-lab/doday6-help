@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>두데이식스 도우미</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=Noto+Serif+KR:wght@300;400;500&display=swap">
+<style>
+/* 검은 바탕 하나, 가운데 유리 같은 입력 캡슐. 캡슐 아래쪽에서 무지갯빛이 번져 질문을 기다리는 느낌을 준다.
+   대화가 시작되면 캡슐은 아래로 내려가고, 답을 만드는 동안 빛이 더 밝게 숨 쉰다. 의도적으로 어두운 화면 하나만 쓴다. */
+:root{
+  color-scheme:dark;
+  --bg:#050506; --ink:#ecedf1; --ink-2:#b4b7c2; --muted:#7c808c; --faint:#4a4d57;
+  --glass:rgba(255,255,255,.055); --glass-2:rgba(255,255,255,.09); --edge:rgba(255,255,255,.09);
+  --path-bg:rgba(150,170,255,.14); --path-ink:#cdd6ff;
+  --c1:#ff8a3d; --c2:#ff4fa3; --c3:#8a5bff; --c4:#2fd6e0; --c5:#3ee08f;
+  --warn:#f2c46b;
+  --display:"Noto Serif KR","AppleMyungjo","Batang",serif;
+  --font:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:16px;line-height:1.8;overflow:hidden}
+.app{position:relative;height:100%;display:flex;flex-direction:column}
+.col{width:100%;max-width:720px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));box-sizing:border-box}
+
+/* 화면 아래쪽에서 천천히 떠다니는 빛 덩어리들. 색마다 속도와 길이 달라서 계속 섞이며 움직인다. */
+.aura{position:fixed;left:50%;bottom:-30vh;width:min(1200px,150vw);height:75vh;transform:translateX(-50%);pointer-events:none;z-index:0;
+  filter:blur(70px) saturate(1.15);opacity:.34;transition:opacity .8s ease;animation:hue 24s linear infinite}
+.aura i{position:absolute;width:46%;height:62%;border-radius:50%;mix-blend-mode:screen;will-change:transform}
+.aura i:nth-child(1){left:6%;top:30%;background:radial-gradient(closest-side,var(--c1),transparent);animation:m1 5s ease-in-out infinite alternate}
+.aura i:nth-child(2){left:30%;top:18%;background:radial-gradient(closest-side,var(--c4),transparent);animation:m2 5s ease-in-out -1.2s infinite alternate}
+.aura i:nth-child(3){left:52%;top:32%;background:radial-gradient(closest-side,var(--c2),transparent);animation:m3 5s ease-in-out -2.5s infinite alternate}
+.aura i:nth-child(4){left:24%;top:42%;background:radial-gradient(closest-side,var(--c3),transparent);animation:m4 5s ease-in-out -3.7s infinite alternate}
+.aura i:nth-child(5){left:60%;top:12%;width:34%;height:48%;background:radial-gradient(closest-side,var(--c5),transparent);opacity:.7;animation:m5 5s ease-in-out -0.6s infinite alternate}
+@keyframes m1{0%{transform:translate(0,0) scale(1)}50%{transform:translate(22%,-14%) scale(1.15)}100%{transform:translate(48%,6%) scale(.9)}}
+@keyframes m2{0%{transform:translate(0,0) scale(1.05)}50%{transform:translate(-30%,12%) scale(.9)}100%{transform:translate(26%,-10%) scale(1.2)}}
+@keyframes m3{0%{transform:translate(0,0) scale(.95)}50%{transform:translate(-38%,-8%) scale(1.2)}100%{transform:translate(-12%,14%) scale(1)}}
+@keyframes m4{0%{transform:translate(0,0) scale(1)}50%{transform:translate(40%,10%) scale(.85)}100%{transform:translate(-20%,-16%) scale(1.15)}}
+@keyframes m5{0%{transform:translate(0,0) scale(1)}100%{transform:translate(-70%,22%) scale(1.25)}}
+@keyframes hue{to{filter:blur(70px) saturate(1.15) hue-rotate(360deg)}}
+.app.thinking .aura{opacity:.55}
+.app.thinking .aura i{animation-duration:2.5s}
+
+#scroll{position:relative;z-index:1;flex:1;overflow-y:auto;min-height:0;scrollbar-width:thin;scrollbar-color:var(--faint) transparent;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 28px,#000 calc(100% - 28px),transparent 100%);
+          mask-image:linear-gradient(to bottom,transparent 0,#000 28px,#000 calc(100% - 28px),transparent 100%)}
+#log{display:flex;flex-direction:column;gap:30px;padding-block:44px 28px}
+
+/* 첫 화면: 인사 + 캡슐이 화면 가운데 */
+.app.empty{justify-content:center}
+.app.empty #scroll{display:none}
+.hello{text-align:center;padding-block:0 30px}
+.hello h1{margin:0;font-family:var(--display);font-size:clamp(28px,5.4vw,38px);font-weight:400;letter-spacing:-.01em;color:var(--ink);text-wrap:balance}
+.hint{margin:14px auto 0;display:block;border:0;background:none;color:var(--muted);font:inherit;font-size:15px;cursor:pointer;min-height:1.8em;transition:opacity .5s ease,color .2s}
+.hint:hover{color:var(--ink-2)}
+.hint.fade{opacity:0}
+.app:not(.empty) .hello{display:none}
+
+/* 메시지 */
+.msg.user{align-self:flex-end;max-width:85%;background:var(--glass-2);border:1px solid var(--edge);border-radius:22px;padding:9px 18px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
+.msg.bot{overflow-wrap:anywhere;min-width:0;color:var(--ink-2);font-weight:400}
+.msg.bot p{margin:0 0 .85em}
+.msg.bot > :last-child{margin-bottom:0}
+.msg.bot ol,.msg.bot ul{margin:0 0 .9em;padding-left:1.4em;display:flex;flex-direction:column;gap:6px}
+.msg.bot li::marker{color:var(--muted)}
+.msg.bot .h{color:var(--ink);font-weight:600;font-size:17px;margin:1.1em 0 .45em}
+.msg.bot .h:first-child{margin-top:0}
+.msg.bot strong{color:var(--ink);font-weight:600}
+.path{background:var(--path-bg);color:var(--path-ink);font-weight:500;padding:1px 8px;border-radius:7px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.msg.bot code{font-size:.92em;background:var(--glass-2);padding:0 5px;border-radius:4px}
+.thinking{display:flex;align-items:center;gap:12px;color:var(--muted)}
+.orb{width:14px;height:14px;border-radius:50%;background:conic-gradient(from 0deg,var(--c1),var(--c2),var(--c3),var(--c4),var(--c5),var(--c1));filter:blur(.5px);animation:spin 2.4s linear infinite}
+.note{font-size:14px;color:var(--warn);margin-top:10px}
+
+/* 한 단계씩: 진행 표시와 빠른 답 */
+.quick{display:flex;flex-direction:column;gap:8px;margin-top:20px;max-width:420px}
+.progress{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted);margin-bottom:4px;font-variant-numeric:tabular-nums}
+.bar{width:84px;height:4px;border-radius:999px;background:var(--glass-2);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--c1),var(--c2),var(--c3),var(--c4))}
+.opt{display:flex;align-items:center;gap:14px;width:100%;text-align:left;border:1px solid var(--edge);background:var(--glass);color:var(--ink);font:inherit;
+  border-radius:14px;padding:12px 16px;cursor:pointer;transition:background .2s,border-color .2s,opacity .3s}
+.opt:hover{background:var(--glass-2);border-color:rgba(255,255,255,.18)}
+.opt .box{flex:none;width:20px;height:20px;box-sizing:border-box;border-radius:6px;border:1.5px solid rgba(255,255,255,.38);display:grid;place-items:center;color:#0b0b0e;transition:background .2s,border-color .2s}
+.opt .box svg{width:13px;height:13px;stroke-dasharray:16;stroke-dashoffset:16;transition:stroke-dashoffset .28s ease .05s}
+.opt[aria-checked="true"]{border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.1)}
+.opt[aria-checked="true"] .box{background:#f2f3f6;border-color:#f2f3f6}
+.opt[aria-checked="true"] .box svg{stroke-dashoffset:0}
+.opt .txt{display:flex;flex-direction:column;line-height:1.4;min-width:0}
+.opt b{font-weight:500;font-size:15px}
+.opt small{font-size:12.5px;color:var(--muted)}
+.quick.done .opt{cursor:default}
+.quick.done .opt:hover{background:var(--glass)}
+.quick.done .opt[aria-checked="false"]{opacity:.32}
+.opt:focus-visible{outline:2px solid var(--c4);outline-offset:2px}
+
+/* 입력 캡슐 */
+.dock{position:relative;z-index:2;padding-block:10px 20px}
+.capsule{position:relative;isolation:isolate;display:flex;align-items:flex-end;gap:10px;min-height:68px;box-sizing:border-box;
+  padding:12px 12px 12px 26px;border-radius:34px;background:#141418;border:1px solid var(--edge);overflow:hidden;
+  box-shadow:0 20px 60px -20px rgba(0,0,0,.8)}
+/* 캡슐 아래쪽에서 피어오르는 빛 */
+.capsule .glow{position:absolute;z-index:-1;left:8%;right:8%;bottom:-70%;height:150%;pointer-events:none;border-radius:50%;
+  background:
+    radial-gradient(30% 45% at 22% 75%, var(--c1), transparent 70%),
+    radial-gradient(28% 50% at 40% 80%, var(--c3), transparent 70%),
+    radial-gradient(26% 55% at 52% 85%, var(--c4), transparent 70%),
+    radial-gradient(28% 50% at 66% 80%, var(--c2), transparent 70%),
+    radial-gradient(30% 45% at 82% 75%, var(--c1), transparent 70%);
+  filter:blur(22px) saturate(1.2);opacity:.5;animation:drift 9s ease-in-out infinite alternate;transition:opacity .6s ease}
+/* 캡슐 아래 테두리의 무지개 선 */
+.capsule::after{content:"";position:absolute;z-index:-1;left:14%;right:14%;bottom:0;height:1.5px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--c1) 18%,var(--c2) 38%,var(--c4) 55%,var(--c3) 72%,var(--c5) 86%,transparent);
+  opacity:.85;filter:blur(.3px)}
+.capsule:focus-within .glow{opacity:.75}
+.app.thinking .capsule .glow{opacity:.95;animation:drift 2.2s ease-in-out infinite alternate,breathe 1.6s ease-in-out infinite}
+@keyframes drift{0%{transform:translateX(-4%) scaleX(1);filter:blur(22px) saturate(1.2) hue-rotate(0deg)}100%{transform:translateX(4%) scaleX(1.08);filter:blur(22px) saturate(1.2) hue-rotate(40deg)}}
+@keyframes breathe{0%,100%{opacity:.7}50%{opacity:1}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+textarea{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:17px;font-weight:400;line-height:1.55;resize:none;padding:9px 0;max-height:200px}
+textarea::placeholder{color:var(--muted)}
+.send{flex:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--edge);background:rgba(255,255,255,.1);color:var(--ink);
+  display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .2s,opacity .2s}
+.send:hover:not(:disabled){background:rgba(255,255,255,.18)}
+.send:disabled{opacity:.3;cursor:default}
+.send svg{width:18px;height:18px}
+.send .stop{display:none}
+.send.busy .arrow{display:none}
+.send.busy .stop{display:block}
+.send:focus-visible,.qbtn:focus-visible,.hint:focus-visible,.fine button:focus-visible{outline:2px solid var(--c4);outline-offset:2px}
+
+.fine{margin:12px 0 0;text-align:center;font-size:12px;color:var(--faint);line-height:1.6}
+.fine button{border:0;background:none;color:var(--muted);font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:0;margin-left:6px}
+
+@media (prefers-reduced-motion:reduce){
+  .capsule .glow,.app.thinking .capsule .glow,.orb,.aura,.aura i,.app.thinking .aura i{animation:none}
+  .hint{transition:none}
+}
+</style>
+</head>
+<body>
+<div class="app empty" id="app">
+  <div class="aura" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  <div id="scroll">
+    <div class="col">
+      <div id="log" aria-live="polite"></div>
+    </div>
+  </div>
+  <div class="dock col">
+    <div class="hello">
+      <h1>무엇을 도와드릴까요?</h1>
+      <button type="button" class="hint" id="hint" aria-label="예시 질문 넣기">“오늘 일일보고서는 어떻게 써요?”</button>
+    </div>
+    <form id="form">
+      <div class="capsule">
+        <span class="glow" aria-hidden="true"></span>
+        <textarea id="q" rows="1" placeholder="DoDay6 사용법을 물어보세요" aria-label="질문"></textarea>
+        <button class="send" id="send" type="submit" aria-label="보내기" disabled>
+          <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          <svg class="stop" viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></svg>
+        </button>
+      </div>
+    </form>
+    <p class="fine"><span id="status">준비하는 중…</span><button type="button" id="reset" hidden>새 대화</button></p>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const app = $("app"), log = $("log"), scroller = $("scroll"), q = $("q"), send = $("send"), statusEl = $("status"), form = $("form"), resetBtn = $("reset");
+let busy = false, ctl = null;
+let turns = [];
+
+// 같은 대화의 질문을 시트에서 묶어 볼 수 있게 대화마다 번호를 붙인다
+const newChatId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+let chatId = newChatId();
+
+// --- 작은 마크다운 렌더러: 목록 · 굵게 · 소제목 · 메뉴 경로 칩 ---
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function inline(s){
+  s = esc(s);
+  s = s.replace(/\*\*(.+?)\*\*/g, (m, t) => (t = t.trim(), t).includes("›") ? `<span class="path">${t}</span>` : `<strong>${t}</strong>`);
+  s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+  return s;
+}
+const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{20E3}\u{1F3FB}-\u{1F3FF}]/gu;
+function md(src){
+  src = src.replace(EMOJI, "").replace(/(\S) {2,}/g, "$1 ");
+  const lines = src.replace(/\r/g, "").split("\n");
+  let html = "", list = null, para = [];
+  const flushPara = () => { if (para.length) { html += `<p>${para.map(inline).join("<br>")}</p>`; para = []; } };
+  const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    let m;
+    if (!line.trim()) { flushPara(); if (list === "ol") continue; closeList(); continue; }
+    if ((m = line.match(/^\d+[.)]\s+(.*)$/))) {
+      flushPara(); if (list !== "ol") { closeList(); html += "<ol>"; list = "ol"; }
+      html += `<li>${inline(m[1])}</li>`; continue;
+    }
+    if ((m = line.match(/^\s*[-*•]\s+(.*)$/))) {
+      flushPara();
+      if (list === "ol" && /^\s+/.test(raw)) { html = html.replace(/<\/li>$/, `<br>· ${inline(m[1])}</li>`); continue; }
+      if (list !== "ul") { closeList(); html += "<ul>"; list = "ul"; }
+      html += `<li>${inline(m[1])}</li>`; continue;
+    }
+    if ((m = line.match(/^#{1,4}\s+(.*)$/))) { flushPara(); closeList(); html += `<p class="h">${inline(m[1])}</p>`; continue; }
+    if (list && /^\s{2,}\S/.test(raw)) { html = html.replace(/<\/li>$/, `<br>${inline(line.trim())}</li>`); continue; }
+    closeList(); para.push(line);
+  }
+  flushPara(); closeList();
+  return html;
+}
+
+// 답 맨 끝의 [단계 2/6] 줄을 떼어 진행 표시로 바꾼다
+const STEP_RE = /\n?[ \t]*\[단계\s*(\d+)\s*\/\s*(\d+)\]\s*$/;
+function splitStep(t){
+  const m = t.match(STEP_RE);
+  if (m) return { body: t.slice(0, m.index), step: { n: +m[1], total: +m[2] } };
+  return { body: t.replace(/\n?[ \t]*\[(단(계[^\]\n]*)?)?$/, ""), step: null };
+}
+function addQuick(el, step){
+  const box = document.createElement("div");
+  box.className = "quick";
+  const pct = Math.max(0, Math.min(100, Math.round(step.n / step.total * 100)));
+  box.innerHTML = `<span class="progress"><span class="bar"><i style="width:${pct}%"></i></span>${step.n} / ${step.total} 단계</span>`;
+  const options = [
+    ["했어요", "다음 단계로 넘어갑니다", () => ask("했어요")],
+    ["잘 안 돼요", "어디서 막혔는지 적어 주시면 다시 알려 드려요", () => {
+      q.placeholder = "화면에 무엇이 보이는지, 어디서 막혔는지 적어 주세요";
+      q.value = "잘 안 돼요. "; autosize(); refreshSend(); q.focus();
+    }]
+  ];
+  for (const [label, sub, act] of options) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "opt";
+    b.setAttribute("role", "checkbox"); b.setAttribute("aria-checked", "false");
+    b.innerHTML = '<span class="box"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.4l3 3 6-6.8"/></svg></span><span class="txt"><b></b><small></small></span>';
+    b.querySelector("b").textContent = label;
+    b.querySelector("small").textContent = sub;
+    b.addEventListener("click", () => {
+      if (box.classList.contains("done") || busy) return;
+      for (const o of box.querySelectorAll(".opt")) o.setAttribute("aria-checked", String(o === b));
+      if (label === "했어요") { box.classList.add("done"); setTimeout(act, 320); } else act();
+    });
+    box.append(b);
+  }
+  el.append(box);
+}
+
+function scrollDown(){ scroller.scrollTop = scroller.scrollHeight; }
+function addMsg(kind, text){
+  app.classList.remove("empty");
+  resetBtn.hidden = false;
+  const el = document.createElement("div");
+  el.className = "msg " + kind;
+  if (kind === "user") el.textContent = text; else el.innerHTML = md(text);
+  log.append(el);
+  scrollDown();
+  return el;
+}
+
+const ERR = {
+  rate_limited: "질문이 너무 많이 몰렸어요. 잠시 뒤에 다시 보내 주세요.",
+  overloaded: "AI가 잠시 바빠요. 조금 뒤에 다시 보내 주세요.",
+  too_long: "질문이 너무 길어요. 조금 줄여서 다시 보내 주세요.",
+  refused: "이 질문에는 답하지 못했어요. 질문을 바꿔서 다시 물어봐 주세요.",
+  no_key: "AI 연결 설정이 아직 끝나지 않았어요. 관리자에게 알려 주세요.",
+  bad_request: "대화가 너무 길어졌거나 형식이 맞지 않아요. 아래 새 대화를 눌러 주세요.",
+  forbidden: "이 주소에서는 AI를 쓸 수 없어요.",
+  offline: "AI 서버에 연결하지 못했어요. 인터넷 연결을 확인하고 다시 보내 주세요."
+};
+
+function refreshSend(){
+  app.classList.toggle("thinking", busy);
+  send.classList.toggle("busy", busy);
+  send.setAttribute("aria-label", busy ? "멈추기" : "보내기");
+  send.disabled = !busy && !q.value.trim();
+}
+
+// 서버(/api/chat)에 대화를 보내고, 한 줄씩 오는 답을 받아 그때그때 화면에 그린다
+async function streamAnswer(messages, signal, onText){
+  let res;
+  try {
+    res = await fetch("api/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messages, chat: chatId }),
+      signal
+    });
+  } catch (e) {
+    if (signal.aborted) throw { code: "cancelled", text: "" };
+    throw { code: "offline", text: "" };
+  }
+  if (!res.body) throw { code: "offline", text: "" };
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "", text = "", done = null;
+  const take = (line) => {
+    if (!line.trim()) return;
+    let ev; try { ev = JSON.parse(line); } catch { return; }
+    if (ev.t) { text += ev.t; onText(text); }
+    else if (ev.error) throw { code: ev.error, text };
+    else if (ev.done) done = ev;
+  };
+  try {
+    for (;;) {
+      const { value, done: end } = await reader.read();
+      if (end) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) { take(buf.slice(0, i)); buf = buf.slice(i + 1); }
+    }
+    take(buf);
+  } catch (e) {
+    if (e && e.code) throw e;
+    throw { code: signal.aborted ? "cancelled" : "offline", text };
+  }
+  if (!done) throw { code: res.ok ? "offline" : "bad_request", text };
+  return { text, truncated: !!done.truncated };
+}
+
+async function ask(text){
+  text = text.trim();
+  if (!text || busy) return;
+  q.value = ""; q.placeholder = "질문하거나, 막힌 곳을 적어 주세요"; autosize();
+  for (const b of log.querySelectorAll(".quick")) b.classList.add("done");
+  addMsg("user", text);
+  turns.push({ role: "user", content: text });
+
+  const bot = addMsg("bot", "");
+  bot.innerHTML = '<div class="thinking"><span class="orb"></span><span>안내문을 찾아보는 중…</span></div>';
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    const span = bot.querySelector(".thinking span:last-child");
+    if (span) span.textContent = `안내문을 찾아보는 중… ${Math.round((Date.now() - t0) / 1000)}초`;
+  }, 1000);
+
+  ctl = new AbortController();
+  busy = true; refreshSend();
+  const recent = turns.slice(-12);
+  while (recent.length && recent[0].role !== "user") recent.shift();
+  try {
+    const { text: answer, truncated } = await streamAnswer(recent, ctl.signal, (t) => {
+      bot.innerHTML = md(splitStep(t).body); scrollDown();
+    });
+    turns.push({ role: "assistant", content: answer });
+    const { body, step } = splitStep(answer);
+    bot.innerHTML = md(body);
+    if (step) addQuick(bot, step);
+    if (truncated) bot.insertAdjacentHTML("beforeend", '<p class="note">답이 길어서 중간에 끊겼어요. "이어서 알려줘"라고 보내 주세요.</p>');
+  } catch (e) {
+    const partial = e && e.text;
+    bot.innerHTML = partial ? md(splitStep(partial).body) : "";
+    if (partial) turns.push({ role: "assistant", content: partial });
+    if (!e || e.code !== "cancelled") {
+      bot.insertAdjacentHTML("beforeend", `<p class="note">${esc(ERR[e && e.code] || "연결이 잠깐 끊겼어요. 다시 보내 주세요.")}</p>`);
+    } else if (!partial) {
+      bot.innerHTML = '<p class="note">멈췄어요.</p>';
+    }
+  } finally {
+    clearInterval(tick);
+    busy = false; refreshSend();
+    scrollDown();
+    q.focus();
+  }
+}
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (busy) { ctl && ctl.abort(); return; }
+  ask(q.value);
+});
+q.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!busy) ask(q.value); }
+});
+function autosize(){ q.style.height = "auto"; q.style.height = Math.min(q.scrollHeight, 200) + "px"; }
+q.addEventListener("input", () => { autosize(); refreshSend(); });
+
+resetBtn.addEventListener("click", () => {
+  if (busy) ctl && ctl.abort();
+  turns = [];
+  chatId = newChatId();
+  log.replaceChildren();
+  app.classList.add("empty");
+  resetBtn.hidden = true;
+  q.focus();
+});
+
+// 첫 화면: 예시 질문이 천천히 바뀌며 질문을 유도한다. 누르면 입력창에 들어간다.
+const HINTS = [
+  "오늘 일일보고서는 어떻게 써요?",
+  "학생을 엑셀로 한 번에 등록하려면?",
+  "학생한테 단어장은 어디서 정해 줘요?",
+  "학부모 리포트 링크는 어디서 복사해요?",
+  "워크시트 걷은 다음엔 뭘 눌러야 해요?",
+  "신입 상담 때 레벨테스트 코드는 어떻게 만들어요?",
+  "그만둔 학생은 어떻게 처리해요?"
+];
+const hint = $("hint");
+let hintIdx = 0;
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+setInterval(() => {
+  if (!app.classList.contains("empty") || q.value) return;
+  hintIdx = (hintIdx + 1) % HINTS.length;
+  if (reduceMotion) { hint.textContent = `“${HINTS[hintIdx]}”`; return; }
+  hint.classList.add("fade");
+  setTimeout(() => { hint.textContent = `“${HINTS[hintIdx]}”`; hint.classList.remove("fade"); }, 500);
+}, 3600);
+hint.addEventListener("click", () => { q.value = HINTS[hintIdx]; autosize(); refreshSend(); q.focus(); });
+
+statusEl.textContent = "DoDay6 사용 안내를 바탕으로 한 단계씩 알려 드려요";
+refreshSend();
+q.focus();
+</script>
+</body>
+</html>
